@@ -3,10 +3,8 @@
 export const SUPABASE_URL = 'https://wvmkxserpyzzugympezl.supabase.co';
 export const SUPABASE_ANON_KEY = 'sb_publishable_fLv1oYRKJcoYLvpZp9ZUyA_UH86ltgK';
 
-// Regras de progressão de fase
-export const PROGRESSAO = {
-  sessoesParaAvancar: 10,   // sessões concluídas na fase atual
-  dorMaximaMedia: 3,        // média de dor pós-treino nas últimas 5 sessões
-  ultimasSessoes: 5,
-  dorAlerta: 7,             // dor pós-treino que dispara orientação
-};
+// Rodízio de treinos: quantos dias diferentes (Dia 1 a Dia 5)
+export const DIAS = 5;
+
+// Dor pós-treino (0–10) a partir da qual o app orienta reduzir a carga
+export const DOR_ALERTA = 7;

@@ -1,5 +1,5 @@
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, PROGRESSAO } from './config.js';
+import { SUPABASE_URL, SUPABASE_ANON_KEY, DIAS, DOR_ALERTA } from './config.js';
 
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const $app = document.getElementById('app');
@@ -121,7 +121,7 @@ async function boot() {
 async function carregarDados() {
   const [s, e] = await Promise.all([
     sb.from('sessoes').select('*').order('data', { ascending: true }),
-    sb.from('exercicios').select('*').order('regiao').order('fase').order('ordem'),
+    sb.from('exercicios').select('*').order('regiao').order('ordem'),
   ]);
   if (s.error) throw s.error;
   if (e.error) throw e.error;
@@ -332,28 +332,32 @@ function renderBloqueado() {
 }
 
 // ---------------- Lógica de treino ----------------
-function faseAtual(regiao) {
-  const desde = state.triagem.created_at.slice(0, 10);
-  let fase = 1;
-  for (; fase < 3; fase++) {
-    const daFase = state.sessoes.filter((s) => s.regiao === regiao && s.fase === fase && s.data >= desde);
-    if (daFase.length < PROGRESSAO.sessoesParaAvancar) break;
-    const ult = daFase.slice(-PROGRESSAO.ultimasSessoes).filter((s) => s.dor_pos != null);
-    const media = ult.reduce((a, s) => a + s.dor_pos, 0) / (ult.length || 1);
-    if (media > PROGRESSAO.dorMaximaMedia) break;
+// Rodízio: o dia avança a cada treino concluído (não pelo calendário)
+const inicioCiclo = () => ymd(new Date(state.triagem.created_at));
+function datasTreino() {
+  const desde = inicioCiclo();
+  return [...new Set(state.sessoes.filter((s) => s.data >= desde).map((s) => s.data))].sort();
+}
+function diaAtual() {
+  const datas = datasTreino();
+  const h = hoje();
+  if (datas.includes(h)) {
+    const s = state.sessoes.find((x) => x.data === h && x.dia);
+    return s ? s.dia : (datas.indexOf(h) % DIAS) + 1;
   }
-  return fase;
+  return (datas.length % DIAS) + 1;
 }
 
 function treinoDoDia() {
-  return state.triagem.regioes.map((regiao) => {
-    const fase = faseAtual(regiao);
-    const disp = state.exercicios.filter((e) => e.regiao === regiao && e.ativo && e.fase <= fase);
-    const faseUsada = disp.length ? Math.max(...disp.map((e) => e.fase)) : fase;
-    return { regiao, fase: faseUsada, lista: disp.filter((e) => e.fase === faseUsada) };
-  });
+  const dia = diaAtual();
+  return state.triagem.regioes.map((regiao) => ({
+    regiao, dia,
+    lista: state.exercicios.filter((e) => e.regiao === regiao && e.ativo && (e.dias || []).includes(dia)),
+  }));
 }
 
+const dose = (e) => `${e.series} ${e.series === 1 ? 'série' : 'séries'} × ${esc(e.repeticoes)}`;
+const diasTxt = (e) => (e.dias || []).length ? `Dias ${e.dias.join(', ').replace(/, (\d+)$/, ' e $1')}` : '';
 const minutos = (lista) => Math.max(3, Math.round(lista.reduce((a, e) => a + (e.series || 1) * 1.2, 0)));
 const feitoHoje = () => state.triagem.regioes.every((r) => state.sessoes.some((s) => s.regiao === r && s.data === hoje()));
 
@@ -408,7 +412,7 @@ function renderInicio() {
       <span class="ico">${ICON.cal}</span>
       <span class="grow">
         <span class="strong" style="display:block">Seu treino do dia</span>
-        <span class="small">${feito ? '<span class="done-badge">✓ Concluído hoje</span>' : `${total} exercícios · ≈ ${minutos(todos)} min · ${esc(regioesTxt)}`}</span>
+        <span class="small">${feito ? '<span class="done-badge">✓ Concluído hoje</span>' : `Dia ${diaAtual()} de ${DIAS} · ${total} exercícios · ≈ ${minutos(todos)} min`}</span>
       </span>
       ${ICON.chev}
     </button>
@@ -445,8 +449,8 @@ function renderTreino() {
   const feito = feitoHoje();
 
   $app.innerHTML = `
-    ${subhead('Treino do dia', 'inicio')}
-    <p class="small row" style="gap:6px">⏱ ${minutos(todos)} min · ${blocos.map((b) => `${REGIOES[b.regiao]} (fase ${b.fase})`).join(' · ')}</p>
+    ${subhead(`Treino do dia · Dia ${diaAtual()} de ${DIAS}`, 'inicio')}
+    <p class="small row" style="gap:6px">⏱ ${minutos(todos)} min · ${blocos.map((b) => REGIOES[b.regiao]).join(' · ')}</p>
     ${blocos.map((b) => `
       ${blocos.length > 1 ? `<div class="region-label">${REGIOES[b.regiao]}</div>` : ''}
       <div class="card" style="padding:4px 6px;margin-top:8px">
@@ -456,7 +460,7 @@ function renderTreino() {
               ${thumb(e)}
               <span class="grow">
                 <span class="ex-name" style="display:block">${i + 1}. ${esc(e.nome)}</span>
-                <span class="small">${e.series} séries × ${esc(e.repeticoes)}</span>
+                <span class="small">${dose(e)}</span>
               </span>
             </button>
             <button class="circle" data-check="${e.id}" aria-pressed="${checks.has(e.id) || feito}" aria-label="Marcar ${esc(e.nome)}">${ICON.check}</button>
@@ -496,11 +500,11 @@ function renderConcluir(blocos) {
 
   $salvar.onclick = async () => {
     $salvar.disabled = true;
-    const linhas = blocos.filter((b) => b.lista.length).map((b) => ({ data: hoje(), regiao: b.regiao, fase: b.fase, dor_pos: dor }));
+    const linhas = blocos.filter((b) => b.lista.length).map((b) => ({ data: hoje(), regiao: b.regiao, dia: b.dia, dor_pos: dor }));
     const { error } = await sb.from('sessoes').upsert(linhas, { onConflict: 'user_id,data,regiao' });
     if (error) { document.getElementById('msg').textContent = error.message; $salvar.disabled = false; return; }
     try { await carregarDados(); } catch {}
-    if (dor >= PROGRESSAO.dorAlerta) {
+    if (dor >= DOR_ALERTA) {
       $app.innerHTML = `<div class="card alert" style="margin-top:20px">
         <h1>Sua dor ficou alta depois do treino</h1>
         <p>Amanhã, faça a série com menos repetições e amplitude menor. Se a dor continuar alta por mais de 2–3 dias, procure um fisioterapeuta.</p>
@@ -517,12 +521,12 @@ async function renderDetalhe({ id, de }) {
   const passos = (e.descricao || '').split(/(?<=\.)\s+/).filter(Boolean);
   $app.innerHTML = `
     ${subhead(esc(e.nome), de)}
-    <p style="margin:0 0 6px"><span class="tag">${REGIOES[e.regiao]} · fase ${e.fase}</span></p>
+    <p style="margin:0 0 6px"><span class="tag">${REGIOES[e.regiao]}${diasTxt(e) ? ' · ' + diasTxt(e) : ''}</span></p>
     ${e.video_path
       ? `<video class="hero-video" controls playsinline preload="metadata" data-path="${esc(e.video_path)}"></video>`
       : `<div class="hero-empty"><div>${ICON.play.replace('<svg', '<svg style="width:40px;height:40px;margin:0 auto 6px;fill:none;stroke:currentColor;stroke-width:1.5"')}Vídeo em breve</div></div>`}
     <div class="card">
-      <p class="strong" style="margin-top:0">${e.series} séries × ${esc(e.repeticoes)}</p>
+      <p class="strong" style="margin-top:0">${dose(e)}</p>
       ${passos.length ? `<p class="strong" style="margin-bottom:0">Como fazer:</p><ol class="steps">${passos.map((p) => `<li>${esc(p)}</li>`).join('')}</ol>` : ''}
       <p class="small">Faça devagar e sem forçar. Um leve desconforto é normal; dor forte, pare.</p>
     </div>`;
@@ -542,7 +546,7 @@ function renderBiblioteca(filtro = 'todos') {
         ${thumb(e)}
         <span class="grow">
           <span class="ex-name" style="display:block">${esc(e.nome)}</span>
-          <span class="small">${REGIOES[e.regiao]} · fase ${e.fase} · ${e.series}×${esc(e.repeticoes)}</span>
+          <span class="small">${REGIOES[e.regiao]} · ${dose(e)}${diasTxt(e) ? '<br>' + diasTxt(e) : ''}</span>
         </span>
         <span style="padding-right:12px">${ICON.chev}</span>
       </button>`).join('') || '<p class="muted">Nenhum exercício nesta região ainda.</p>'}`;
@@ -574,7 +578,6 @@ function renderProgresso() {
   const feitosSemana = semana.filter((d) => dias.has(d)).length;
   const r = 62, c = 2 * Math.PI * r, pct = Math.min(1, seq / 7);
   const nomesDias = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
-  const desde = state.triagem.created_at.slice(0, 10);
 
   $app.innerHTML = `
     <h1>Meu progresso</h1>
@@ -600,17 +603,25 @@ function renderProgresso() {
       </div>
     </div>
 
-    <h2>Fases por região</h2>
+    <h2>Rodízio de ${DIAS} dias</h2>
+    <div class="card">
+      <div class="cycle">
+        ${[...Array(DIAS)].map((_, k) => {
+          const d = k + 1, atual = diaAtual(), feito = d < atual || (d === atual && feitoHoje());
+          return `<div class="${feito ? 'on' : ''} ${d === atual ? 'now' : ''}"><span>${feito ? '✓' : d}</span><small>Dia ${d}</small></div>`;
+        }).join('')}
+      </div>
+      <p class="small" style="margin-bottom:0">${feitoHoje() ? `Dia ${diaAtual()} concluído hoje. Amanhã: Dia ${diaAtual() % DIAS + 1}.` : `Próximo treino: Dia ${diaAtual()}.`} Depois do Dia ${DIAS}, volta ao Dia 1.</p>
+    </div>
+
+    <h2>Dor depois do treino</h2>
     ${state.triagem.regioes.map((reg) => {
-      const fase = faseAtual(reg);
-      const naFase = state.sessoes.filter((s) => s.regiao === reg && s.fase === fase && s.data >= desde).length;
-      const p = fase === 3 ? 100 : Math.min(100, (naFase / PROGRESSAO.sessoesParaAvancar) * 100);
       const ult = state.sessoes.filter((s) => s.regiao === reg && s.dor_pos != null).slice(-5);
       const media = ult.length ? (ult.reduce((a, s) => a + s.dor_pos, 0) / ult.length).toFixed(1) : '—';
+      const pct = ult.length ? (10 - media) * 10 : 0;
       return `<div class="card">
-        <div class="row"><span class="strong grow">${REGIOES[reg]}</span><span class="tag">Fase ${fase}</span></div>
-        <p class="small" style="margin-bottom:0">${fase === 3 ? 'Fase final alcançada' : `${naFase}/${PROGRESSAO.sessoesParaAvancar} treinos para a próxima fase`} · dor média recente: ${media}</p>
-        <div class="bar"><span style="width:${p}%"></span></div>
+        <div class="row"><span class="strong grow">${REGIOES[reg]}</span><span class="tag">${media}/10</span></div>
+        <p class="small" style="margin-bottom:0">Média dos últimos ${ult.length || 0} treinos</p>
       </div>`;
     }).join('')}
 
@@ -643,7 +654,7 @@ function renderMais() {
       ${subhead('Ajuda', 'mais')}
       <div class="card">
         <p><b>Como funciona:</b> a triagem define as regiões do seu treino. Faça a série uma vez por dia e marque como realizado.</p>
-        <p><b>Fases:</b> depois de ${PROGRESSAO.sessoesParaAvancar} treinos com dor média até ${PROGRESSAO.dorMaximaMedia}/10, a série avança para a próxima fase.</p>
+        <p><b>Rodízio:</b> são ${DIAS} treinos diferentes (Dia 1 a Dia ${DIAS}), com 3 exercícios por região. O dia avança a cada treino concluído; se você faltar, continua de onde parou.</p>
         <p><b>Mudou a dor?</b> Refaça a triagem em Mais → Refazer triagem.</p>
         <p class="small">Este app não substitui uma avaliação profissional. Se a dor piorar ou surgirem sintomas novos, procure um fisioterapeuta ou médico.</p>
       </div>`;

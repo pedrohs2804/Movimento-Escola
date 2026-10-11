@@ -179,7 +179,7 @@ input:focus { outline: 2px solid var(--sage-2); outline-offset: 1px; }
 /* Progresso */
 .ring-wrap { display: grid; place-items: center; padding: 8px 0 4px; }
 .ring { position: relative; width: 150px; height: 150px; }
-.ring svg { width: 150px; height: 150px; transform: rotate(-90deg); }
+.ring > svg { width: 150px; height: 150px; transform: rotate(-90deg); }
 .ring .lbl { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; }
 .ring .num { font-size: 30px; font-weight: 800; line-height: 1; }
 .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -220,3 +220,14 @@ input:focus { outline: 2px solid var(--sage-2); outline-offset: 1px; }
 .tabs button.active svg { stroke-width: 2.2; }
 
 .done-badge { display: inline-flex; align-items: center; gap: 6px; color: var(--sage); font-weight: 800; }
+
+/* Rodízio de 5 dias */
+.cycle { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; text-align: center; margin-bottom: 8px; }
+.cycle div { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.cycle span {
+  width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--sage-soft); color: var(--sage); font-weight: 800;
+}
+.cycle .on span { background: var(--sage); color: #fff; }
+.cycle .now span { box-shadow: 0 0 0 3px var(--sun); }
+.cycle small { font-size: 11px; color: var(--muted); font-weight: 700; }

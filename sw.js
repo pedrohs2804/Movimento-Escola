@@ -1,5 +1,5 @@
 // Cache só do "casco" do app; dados e vídeos sempre da rede.
-const CACHE = 'me-v2';
+const CACHE = 'me-v3';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/config.js', '/manifest.json', '/icon.svg'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', (e) => {
